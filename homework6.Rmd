@@ -1,0 +1,127 @@
+---
+title: "Nonparametric Homework 6"
+author: "Brad Hughes"
+date: "4/8/2020"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+school = read.csv("C:/Users/Brad/Documents/Classes/Stat488_nonpara/ill_school_data.csv", header = T)
+attach(school)
+```
+Everyone in this data set is an Illinois, high school student. The 99 year old in the data set is either an alien or a sample observation that was not removed. This person has a height of 999cm, a reaction time of 0.002 (milliseconds?), knows 7 languages, and is in 10th grade. I'm convinced this is a protagonist to an anime. There are a bunch of other large numbers where they shouldn't be, such as a foot length of 97cm is probably supposed to be 9.7cm or the arm span of 'idk'. I really want to know where in Illinois it is possible to travel to school in a boat. The importance stats appear to range from 0-1000 but some people felt more passionate with scores of 9000. A lot of students are missing the favorite _____ categories.
+
+```{r}
+school %>% select(Handed, Favorite_Season) %>% group_by(Handed, Favorite_Season) %>% count()
+```
+I think it is probably fine to remove the blanks associated with Handed and Favorite_season in this case. There are 51 observations missing one of or both values which is 10% of our total data. The amount of our missing data is still small enough and we also still have a very large sample of 450 where it will probably be alright.
+
+```{r warning=FALSE}
+hand_season = school %>% select(Handed, Favorite_Season)
+hand_season = hand_season[!(hand_season$Handed=="" | hand_season$Favorite_Season == ""),]
+hand_season$Handed = droplevels(hand_season$Handed, exclude = "")
+hand_season$Favorite_Season = droplevels(hand_season$Favorite_Season, exclude = "")
+table(hand_season)
+
+chisqobs = chisq.test(table(hand_season))$statistic;chisqobs
+set.seed(42)
+nsim = 1000
+chisqvals = rep(NA,nsim)
+for (i in 1:nsim) {
+  dataTemp = hand_season
+  dataTemp$Handed = dataTemp$Handed[sample(1:449,449)]
+  chisqvals[i] = chisq.test(table(dataTemp))$statistic
+}
+hist(chisqvals)
+sum(chisqvals > chisqobs)/nsim
+detach(school)
+```
+Assuming that the two variables of dominant hand and favorite season are independent I decided to run a permutation test to test the alternative hypothesis that the 2 variables are not independent. With alpha=0.05 I obtained a p-value of 0.721 which is much higher than our critical alpha so we failed in showing any dependence of the 2 variables. I chose this test because it's a nonparametric class. Permutation tests work under the assumption that the variables are indepedent and all of our observations are randomly selected.
+
+```{r}
+library(readr)
+HAdata = school %>% select(Height_cm, Armspan_cm, Ageyears, Footlength_cm, Index_Fingerlength_mm, Ring_Fingerlength_mm)
+HAdata = sapply(HAdata, as.character)
+for (i in 1:6) {
+  HAdata[,i] = parse_number(HAdata[,i], na=c("", "NA", "idk"))
+}
+HAdata = as.data.frame(HAdata)
+for (i in 1:6) {
+  HAdata[,i] = as.numeric(as.character(HAdata[,i]))
+}
+attach(HAdata)
+HAdata$Height_cm = ifelse(Height_cm > 201, NA, ifelse(Height_cm < 2, Height_cm*100, ifelse(Height_cm < 9, Height_cm*10+100, ifelse(Height_cm < 100, Height_cm+100, Height_cm))))
+HAdata$Armspan_cm = ifelse(Armspan_cm < 2, Armspan_cm*100, ifelse(Armspan_cm < 100, Armspan_cm+100, ifelse(Armspan_cm > 400, NA, Armspan_cm)))
+HAdata$Ageyears = ifelse(Ageyears > 20, NA, Ageyears)
+HAdata$Footlength_cm = ifelse(Footlength_cm > 55, NA, ifelse(Footlength_cm < 10, Footlength_cm+10, Footlength_cm))
+HAdata$Index_Fingerlength_mm = ifelse(Index_Fingerlength_mm > 120, NA, ifelse(Index_Fingerlength_mm <= 30, NA, Index_Fingerlength_mm))
+HAdata$Ring_Fingerlength_mm = ifelse(Ring_Fingerlength_mm > 120, NA, ifelse(Ring_Fingerlength_mm <= 30, NA, Ring_Fingerlength_mm))
+detach(HAdata)
+```
+
+```{r}
+library(mice)
+imps = mice(HAdata, m=5, method="cart")
+impslist = list()
+impslist[[1]] = complete(imps)
+impslist[[2]] = complete(imps,2)
+impslist[[3]] = complete(imps,3)
+impslist[[4]] = complete(imps,4)
+impslist[[5]] = complete(imps,5)
+
+betaList<-seList<-list()
+for (i in 1:5) {
+  betaList[[i]]<-summary(lm(Height_cm~Armspan_cm, data = as.data.frame(impslist[[i]])))$coefficients[,1]
+  seList[[i]]<-summary(lm(Height_cm~Armspan_cm, data = as.data.frame(impslist[[i]])))$coefficients[,2]
+}
+
+M=5
+apply(do.call(rbind,betaList),2,mean)
+
+B<-apply(do.call(rbind,betaList),2,var)
+W<-apply(do.call(rbind,seList)^2,2,mean)
+T<-(1+1/M)*B + W
+sqrt(T)
+```
+The final model is Height=94.06+0.44*Armspan with respective SE's of 4.89 and 0.03.
+
+```{r}
+imps_rf = mice(HAdata, m=5, method="rf")
+impslist_rf = list()
+impslist_rf[[1]] = complete(imps_rf)
+impslist_rf[[2]] = complete(imps_rf,2)
+impslist_rf[[3]] = complete(imps_rf,3)
+impslist_rf[[4]] = complete(imps_rf,4)
+impslist_rf[[5]] = complete(imps_rf,5)
+
+betaList_rf<-seList_rf<-list()
+for (i in 1:5) {
+  betaList_rf[[i]]<-summary(lm(Height_cm~Armspan_cm, data = as.data.frame(impslist_rf[[i]])))$coefficients[,1]
+  seList_rf[[i]]<-summary(lm(Height_cm~Armspan_cm, data = as.data.frame(impslist_rf[[i]])))$coefficients[,2]
+}
+
+M=5
+apply(do.call(rbind,betaList_rf),2,mean)
+
+B_rf<-apply(do.call(rbind,betaList_rf),2,var)
+W_rf<-apply(do.call(rbind,seList_rf)^2,2,mean)
+T_rf<-(1+1/M)*B_rf + W_rf
+sqrt(T_rf)
+```
+This model is Height=98.12+0.42*Armspan with respective SE's of 4.98 and 0.03.
+
+## Github Link
+https://github.com/BradHughes91/Non_Parametric
+
+
+
+
+
+
+
+
+
+
+
+
